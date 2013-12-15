@@ -38,10 +38,11 @@ SRC_MAKEFILES := $(call rwildcard,$(SRC_PATH)/,build.mk)
 
 # Add our user folder.
 USER_DIR ?=user
-SRC_MAKEFILES += $(call rwildcard,$(SRC_PATH)/$(USER_DIR),subdir.mk)
+USER_MAKEFILES := $(call rwildcard,$(SRC_PATH)/$(USER_DIR),subdir.mk)
 
 # Include all build.mk defines source files.
 include $(SRC_MAKEFILES)
+include $(USER_MAKEFILES)
 
 # Paths to dependant projects, referenced from root of this project
 LIB_CORE_COMMON_PATH = ../core-common-lib
