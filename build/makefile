@@ -30,7 +30,7 @@ BUILD_PATH = obj
 SRC_PATH = ..
 
 # Target this makefile is building. (let our target be adjustable)
-CORE_FIRMWARE? = core-firmware
+CORE_FIRMWARE ?= core-firmware
 TARGET = $(CORE_FIRMWARE)
 
 # Find all build.mk makefiles in each source directory in the src tree.
