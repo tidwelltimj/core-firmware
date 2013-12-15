@@ -37,7 +37,7 @@ TARGET = $(CORE_FIRMWARE)
 SRC_MAKEFILES := $(call rwildcard,$(SRC_PATH)/,build.mk)
 
 # Add our user folder.
-USER_DIR?=user
+USER_DIR ?=user
 SRC_MAKEFILES += $(call rwildcard,$(SRC_PATH)/$(USER_DIR),subdir.mk)
 
 # Include all build.mk defines source files.
