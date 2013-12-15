@@ -416,12 +416,11 @@ void analogWrite(uint16_t pin, uint8_t value)
 	TIM_OCInitTypeDef  TIM_OCInitStructure;
 
 	//PWM Frequency : 500 Hz
-	uint16_t TIM_Prescaler = (uint16_t)(SystemCoreClock / 10000) - 1;
-	uint16_t TIM_ARR = (uint16_t)(10000 / TIM_PWM_FREQ) - 1;
+	uint16_t TIM_Prescaler = (uint16_t)(SystemCoreClock / 24000000) - 1;//TIM Counter clock = 24MHz
+	uint16_t TIM_ARR = (uint16_t)(24000000 / TIM_PWM_FREQ) - 1;
 
-	uint16_t Duty_Cycle = (uint16_t)((value * 100) / 255);
 	// TIM Channel Duty Cycle(%) = (TIM_CCR / TIM_ARR + 1) * 100
-	uint16_t TIM_CCR = (uint16_t)((Duty_Cycle * (TIM_ARR + 1)) / 100);
+	uint16_t TIM_CCR = (uint16_t)(value * (TIM_ARR + 1) / 255);
 
 	// AFIO clock enable
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
@@ -498,46 +497,18 @@ uint32_t millis()
 
 /*
  * @brief This should block for a certain number of milliseconds.
- *        There are a number of ways to implement this, but I borrowed the one that Wiring/Arduino uses;
- *        Using the millis() function to check if a certain amount of time has passed.
  */
 void delay(uint32_t ms)
 {
-	//uint32_t start = millis();
-	//while(millis() - start < ms);
-	//OR
-	//Use the Delay() from main.c
 	Delay(ms);
 }
 
 /*
  * @brief This should block for a certain number of microseconds.
- *        This will only be used for small intervals of time, so it has different requirements than the above.
- *        It must be accurate at small intervals, but does not have to function properly
- *        with intervals more than a couple of seconds.
- *
- *        The below implementation is borrowed straight from Maple. I do not understand the code, nor do I
- *        understand the derivation of the multiplier.
- *
- *        This function is lower priority than the others.
  */
 void delayMicroseconds(uint32_t us)
 {
-	// We have to multiply this by something, but I'm not sure what.
-	// Depends on how many clock cycles the below assembly code takes, I suppose.
-	//
-	/*
-	 us *= STM32_DELAY_US_MULT;
-
-	 // fudge for function call overhead
-	 us--;
-	 asm volatile("   mov r0, %[us]          \n\t"
-	 "1: subs r0, #1            \n\t"
-	 "   bhi 1b                 \n\t"
-	 :
-	 : [us] "r" (us)
-	 : "r0");
-	 */
+	Delay_Microsecond(us);
 }
 
 long map(long value, long fromStart, long fromEnd, long toStart, long toEnd)
