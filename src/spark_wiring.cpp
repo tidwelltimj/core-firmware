@@ -490,15 +490,23 @@ void analogWrite(uint16_t pin, uint8_t value)
  * 		  For now, let's not worry about what happens when this overflows (which should happen after 49 days).
  * 		  At some point we'll have to figure that out, though.
  */
-uint32_t millis()
+unsigned long millis(void)
 {
 	return TimingMillis;
 }
 
 /*
+ * @brief Should return the number of microseconds since the processor started up.
+ */
+unsigned long micros(void)
+{
+	return (DWT->CYCCNT / US_TICKS);
+}
+
+/*
  * @brief This should block for a certain number of milliseconds.
  */
-void delay(uint32_t ms)
+void delay(unsigned long ms)
 {
 	Delay(ms);
 }
@@ -506,7 +514,7 @@ void delay(uint32_t ms)
 /*
  * @brief This should block for a certain number of microseconds.
  */
-void delayMicroseconds(uint32_t us)
+void delayMicroseconds(unsigned int us)
 {
 	Delay_Microsecond(us);
 }
@@ -514,4 +522,34 @@ void delayMicroseconds(uint32_t us)
 long map(long value, long fromStart, long fromEnd, long toStart, long toEnd)
 {
     return (value - fromStart) * (toEnd - toStart) / (fromEnd - fromStart) + toStart;
+}
+
+uint8_t shiftIn(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder) {
+	uint8_t value = 0;
+	uint8_t i;
+
+	for (i = 0; i < 8; ++i) {
+		digitalWrite(clockPin, HIGH);
+		if (bitOrder == LSBFIRST)
+			value |= digitalRead(dataPin) << i;
+		else
+			value |= digitalRead(dataPin) << (7 - i);
+		digitalWrite(clockPin, LOW);
+	}
+	return value;
+}
+
+void shiftOut(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder, uint8_t val)
+{
+	uint8_t i;
+
+	for (i = 0; i < 8; i++)  {
+		if (bitOrder == LSBFIRST)
+			digitalWrite(dataPin, !!(val & (1 << i)));
+		else
+			digitalWrite(dataPin, !!(val & (1 << (7 - i))));
+
+		digitalWrite(clockPin, HIGH);
+		digitalWrite(clockPin, LOW);
+	}
 }
