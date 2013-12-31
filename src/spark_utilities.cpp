@@ -119,15 +119,15 @@ void RGBClass::control(bool override)
 #endif
 }
 
-void RGBClass::color(int red, int blue, int green)
+void RGBClass::color(int red, int green, int blue)
 {
 #if !defined (RGB_NOTIFICATIONS_ON)
 	if (true != _control)
 		return;
 
-	TIM1->CCR2 = (uint16_t)(red * (TIM1->ARR + 1) / 255);	//Red Led
-	TIM1->CCR3 = (uint16_t)(blue * (TIM1->ARR + 1) / 255);	//Green Led
-	TIM1->CCR1 = (uint16_t)(green * (TIM1->ARR + 1) / 255);	//Blue Led
+	TIM1->CCR2 = (uint16_t)(red   * (TIM1->ARR + 1) / 255);	// Red LED
+	TIM1->CCR3 = (uint16_t)(green * (TIM1->ARR + 1) / 255);	// Green LED
+	TIM1->CCR1 = (uint16_t)(blue  * (TIM1->ARR + 1) / 255);	// Blue LED
 #endif
 }
 
@@ -315,6 +315,18 @@ void copyUserFunctionKey(char *destination, int function_index)
          USER_FUNC_KEY_LENGTH);
 }
 
+int numUserVariables(void)
+{
+  return User_Var_Count;
+}
+
+void copyUserVariableKey(char *destination, int variable_index)
+{
+  memcpy(destination,
+         User_Var_Lookup_Table[variable_index].userVarKey,
+         USER_VAR_KEY_LENGTH);
+}
+
 SparkReturnType::Enum wrapVarTypeInEnum(const char *varKey)
 {
   switch (userVarType(varKey))
@@ -355,6 +367,8 @@ void Spark_Protocol_Init(void)
     descriptor.num_functions = numUserFunctions;
     descriptor.copy_function_key = copyUserFunctionKey;
     descriptor.call_function = userFuncSchedule;
+    descriptor.num_variables = numUserVariables;
+    descriptor.copy_variable_key = copyUserVariableKey;
     descriptor.variable_type = wrapVarTypeInEnum;
     descriptor.get_variable = getUserVar;
     descriptor.was_ota_upgrade_successful = OTA_Flashed_GetStatus;
