@@ -42,9 +42,11 @@ extern "C" {
 /* Private macro -------------------------------------------------------------*/
 
 /* Private variables ---------------------------------------------------------*/
-__IO uint32_t TimingMillis;
+volatile uint32_t TimingMillis;
+volatile uint32_t TimingCloudSocketTimeout;
+volatile uint32_t TimingFlashUpdateTimeout;
 
-uint8_t ApplicationSetupOnce = 0;
+volatile uint8_t SPARK_WIRING_APPLICATION = 0;
 
 uint8_t  USART_Rx_Buffer[USART_RX_DATA_SIZE];
 uint32_t USART_Rx_ptr_in = 0;
@@ -138,78 +140,39 @@ int main(void)
 	SPARK_WLAN_Setup(Multicast_Presence_Announcement);
 #endif
 
+	/* Connect to Spark Cloud by default */
+	SPARK_SOCKET_HANDSHAKE = 1;
+
 	/* Main loop */
 	while (1)
 	{
 #ifdef SPARK_WLAN_ENABLE
 		SPARK_WLAN_Loop();
-
-		if (SPARK_SOCKET_CONNECTED)
-		{
-			if (!SPARK_HANDSHAKE_COMPLETED)
-			{
-				int err = Spark_Handshake();
-				if (err)
-				{
-					if (0 > err)
-					{
-						// Wrong key error, red
-						LED_SetRGBColor(0xff0000);
-					}
-					else if (1 == err)
-					{
-						// RSA decryption error, orange
-						LED_SetRGBColor(0xff6000);
-					}
-					else if (2 == err)
-					{
-						// RSA signature verification error, magenta
-						LED_SetRGBColor(0xff00ff);
-					}
-					LED_On(LED_RGB);
-				}
-				else
-				{
-					SPARK_HANDSHAKE_COMPLETED = 1;
-					ApplicationSetupOnce = 1;
-				}
-			}
-
-			if (!Spark_Communication_Loop())
-			{
-				if (LED_RGB_OVERRIDE)
-				{
-					LED_Signaling_Stop();
-				}
-				SPARK_FLASH_UPDATE = 0;
-				SPARK_LED_FADE = 0;
-				SPARK_HANDSHAKE_COMPLETED = 0;
-				SPARK_SOCKET_CONNECTED = 0;
-			}
-		}
 #endif
 
 #ifdef SPARK_WIRING_ENABLE
 #ifdef SPARK_WLAN_ENABLE
-		if(SPARK_HANDSHAKE_COMPLETED && !SPARK_FLASH_UPDATE && !IWDG_SYSTEM_RESET)
+		if(SPARK_HANDSHAKE_COMPLETED || SPARK_WIRING_APPLICATION)
 		{
+			if(!SPARK_FLASH_UPDATE && !IWDG_SYSTEM_RESET)
+			{
 #endif
-			if((ApplicationSetupOnce != 0) && (NULL != setup))
-			{
-				//Execute user application setup only once
-				setup();
-				ApplicationSetupOnce = 0;
-			}
+				if((SPARK_WIRING_APPLICATION != 1) && (NULL != setup))
+				{
+					//Execute user application setup only once
+					setup();
+					SPARK_WIRING_APPLICATION = 1;
+				}
 
-			if(NULL != loop)
-			{
-				//Execute user application loop
-				loop();
-			}
-
-			userEventSend();
+				if(NULL != loop)
+				{
+					//Execute user application loop
+					loop();
+				}
 
 #ifdef SPARK_WLAN_ENABLE
+				userEventSend();
+			}
 		}
 #endif
 #endif
@@ -316,22 +279,33 @@ void Timing_Decrement(void)
 		WLAN_DELETE_PROFILES = 1;
 	}
 
-	if(!SPARK_WLAN_SLEEP && SPARK_HANDSHAKE_COMPLETED)
+	if(!SPARK_WLAN_SLEEP)
 	{
-		if (TimingSparkCommTimeout >= TIMING_SPARK_COMM_TIMEOUT)
+		if(SPARK_FLASH_UPDATE)
 		{
-			TimingSparkCommTimeout = 0;
-
-			if(!ApplicationSetupOnce)
+			if (TimingFlashUpdateTimeout >= TIMING_FLASH_UPDATE_TIMEOUT)
 			{
-				//Work around to reset WLAN in special cases such as
-				//when the server goes down during OTA upgrade
-				Spark_ConnectAbort_WLANReset();
+				//Reset is the only way now to recover from stuck OTA update
+				NVIC_SystemReset();
+			}
+			else
+			{
+				TimingFlashUpdateTimeout++;
 			}
 		}
-		else
+		else if(SPARK_HANDSHAKE_COMPLETED)
 		{
-			TimingSparkCommTimeout++;
+			if (TimingCloudSocketTimeout >= TIMING_CLOUD_SOCKET_TIMEOUT)
+			{
+				TimingCloudSocketTimeout = 0;
+
+				//Reset WLAN in worst case if Spark_Communication_Loop() doesn't detect failure
+				Spark_ConnectAbort_WLANReset();
+			}
+			else
+			{
+				TimingCloudSocketTimeout++;
+			}
 		}
 	}
 #endif
@@ -361,6 +335,8 @@ void USB_USART_Init(uint32_t baudRate)
 {
 	linecoding.bitrate = baudRate;
 	USB_Disconnect_Config();
+	USB_Cable_Config(DISABLE);
+	Delay_Microsecond(100000);
 	Set_USBClock();
 	USB_Interrupts_Config();
 	USB_Init();
@@ -460,9 +436,9 @@ void Handle_USBAsynchXfer (void)
 		}
 
 		if(USART_Rx_ptr_out > USART_Rx_ptr_in) /* rollback */
-				{
+		{
 			USART_Rx_length = USART_RX_DATA_SIZE - USART_Rx_ptr_out;
-				}
+		}
 		else
 		{
 			USART_Rx_length = USART_Rx_ptr_in - USART_Rx_ptr_out;

@@ -28,17 +28,15 @@
 
 tNetappIpconfigRetArgs ip_config;
 
-__IO uint32_t TimingSparkCommTimeout;
-
-uint8_t WLAN_MANUAL_CONNECT = 0; //For Manual connection, set this to 1
-uint8_t WLAN_DELETE_PROFILES;
-uint8_t WLAN_SMART_CONFIG_START;
-uint8_t WLAN_SMART_CONFIG_STOP;
-uint8_t WLAN_SMART_CONFIG_FINISHED;
-uint8_t WLAN_SERIAL_CONFIG_DONE;
-uint8_t WLAN_CONNECTED;
-uint8_t WLAN_DHCP;
-uint8_t WLAN_CAN_SHUTDOWN;
+volatile uint8_t WLAN_MANUAL_CONNECT = 0; //For Manual connection, set this to 1
+volatile uint8_t WLAN_DELETE_PROFILES;
+volatile uint8_t WLAN_SMART_CONFIG_START;
+volatile uint8_t WLAN_SMART_CONFIG_STOP;
+volatile uint8_t WLAN_SMART_CONFIG_FINISHED;
+volatile uint8_t WLAN_SERIAL_CONFIG_DONE;
+volatile uint8_t WLAN_CONNECTED;
+volatile uint8_t WLAN_DHCP;
+volatile uint8_t WLAN_CAN_SHUTDOWN;
 
 void (*announce_presence)(void);
 
@@ -61,17 +59,16 @@ unsigned char wlan_profile_index;
 
 unsigned char NVMEM_Spark_File_Data[NVMEM_SPARK_FILE_SIZE];
 
-__IO uint8_t SPARK_WLAN_RESET;
-__IO uint8_t SPARK_WLAN_SLEEP;
-__IO uint8_t SPARK_WLAN_STARTED;
-__IO uint8_t SPARK_SOCKET_CONNECTED;
-__IO uint8_t SPARK_HANDSHAKE_COMPLETED;
-__IO uint8_t SPARK_FLASH_UPDATE;
-__IO uint8_t SPARK_LED_FADE;
+volatile uint8_t SPARK_WLAN_RESET;
+volatile uint8_t SPARK_WLAN_SLEEP;
+volatile uint8_t SPARK_WLAN_STARTED;
+volatile uint8_t SPARK_SOCKET_HANDSHAKE;
+volatile uint8_t SPARK_SOCKET_CONNECTED;
+volatile uint8_t SPARK_HANDSHAKE_COMPLETED;
+volatile uint8_t SPARK_FLASH_UPDATE;
+volatile uint8_t SPARK_LED_FADE;
 
-__IO uint8_t Spark_Error_Count;
-
-int Internet_Test(void);
+volatile uint8_t Spark_Error_Count;
 
 void Set_NetApp_Timeout(void)
 {
@@ -127,8 +124,6 @@ void Start_Smart_Config(void)
 	SPARK_HANDSHAKE_COMPLETED = 0;
 	SPARK_FLASH_UPDATE = 0;
 	SPARK_LED_FADE = 0;
-
-	TimingSparkCommTimeout = 0;
 
 #if defined (USE_SPARK_CORE_V02)
 	LED_SetRGBColor(RGB_COLOR_BLUE);
@@ -246,6 +241,8 @@ void Start_Smart_Config(void)
 	LED_On(LED_RGB);
 #endif
 
+	Set_NetApp_Timeout();
+
 	WLAN_SMART_CONFIG_START = 0;
 }
 
@@ -293,7 +290,6 @@ void WLAN_Async_Callback(long lEventType, char *data, unsigned char length)
 			SPARK_FLASH_UPDATE = 0;
 			SPARK_LED_FADE = 0;
 			Spark_Error_Count = 0;
-			TimingSparkCommTimeout = 0;
 			break;
 
 		case HCI_EVNT_WLAN_UNSOL_DHCP:
@@ -381,13 +377,6 @@ void SPARK_WLAN_Setup(void (*presence_announcement_callback)(void))
 		Save_SystemFlags();
 	}
 
-	if(NVMEM_Spark_File_Data[WLAN_TIMEOUT_FILE_OFFSET] == 0)
-	{
-		Set_NetApp_Timeout();
-		NVMEM_Spark_File_Data[WLAN_TIMEOUT_FILE_OFFSET] = 1;
-		nvmem_write(NVMEM_SPARK_FILE_ID, 1, WLAN_TIMEOUT_FILE_OFFSET, &NVMEM_Spark_File_Data[WLAN_TIMEOUT_FILE_OFFSET]);
-	}
-
 	if(!WLAN_MANUAL_CONNECT)
 	{
 		if(NVMEM_Spark_File_Data[WLAN_PROFILE_FILE_OFFSET] == 0)
@@ -418,6 +407,8 @@ void SPARK_WLAN_Setup(void (*presence_announcement_callback)(void))
 	}
 
 	Clear_NetApp_Dhcp();
+
+	Set_NetApp_Timeout();
 }
 
 void SPARK_WLAN_Loop(void)
@@ -439,9 +430,9 @@ void SPARK_WLAN_Loop(void)
 			SPARK_FLASH_UPDATE = 0;
 			SPARK_LED_FADE = 0;
 			Spark_Error_Count = 0;
-			TimingSparkCommTimeout = 0;
 
 			CC3000_Write_Enable_Pin(WLAN_DISABLE);
+			//wlan_stop();
 
 			Delay(100);
 
@@ -499,6 +490,24 @@ void SPARK_WLAN_Loop(void)
 		}
 
 		WLAN_SMART_CONFIG_STOP = 0;
+	}
+
+	if(SPARK_SOCKET_HANDSHAKE == 0)
+	{
+		if(SPARK_SOCKET_CONNECTED || SPARK_HANDSHAKE_COMPLETED)
+		{
+			Spark_Disconnect();
+
+			SPARK_FLASH_UPDATE = 0;
+			SPARK_LED_FADE = 0;
+			SPARK_HANDSHAKE_COMPLETED = 0;
+			SPARK_SOCKET_CONNECTED = 0;
+
+			LED_SetRGBColor(RGB_COLOR_GREEN);
+			LED_On(LED_RGB);
+		}
+
+		return;
 	}
 
 	if(WLAN_DHCP && !SPARK_WLAN_SLEEP && !SPARK_SOCKET_CONNECTED)
@@ -559,45 +568,57 @@ void SPARK_WLAN_Loop(void)
 			SPARK_SOCKET_CONNECTED = 1;
 		}
 	}
-}
 
-int Internet_Test(void)
-{
-	long testSocket;
-	sockaddr testSocketAddr;
-	int testResult = 0;
-
-    testSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    if (testSocket < 0)
-    {
-        return -1;
-    }
-
-	// the family is always AF_INET
-    testSocketAddr.sa_family = AF_INET;
-
-	// the destination port: 53
-    testSocketAddr.sa_data[0] = 0;
-    testSocketAddr.sa_data[1] = 53;
-
-	// the destination IP address: 8.8.8.8
-	testSocketAddr.sa_data[2] = 8;
-	testSocketAddr.sa_data[3] = 8;
-	testSocketAddr.sa_data[4] = 8;
-	testSocketAddr.sa_data[5] = 8;
-
-	testResult = connect(testSocket, &testSocketAddr, sizeof(testSocketAddr));
-
-	if (testResult < 0)
+	if (SPARK_SOCKET_CONNECTED)
 	{
-		// Unable to connect
-		return -1;
-	}
-	else
-	{
-		closesocket(testSocket);
-	}
+		if (!SPARK_HANDSHAKE_COMPLETED)
+		{
+			int err = Spark_Handshake();
+			if (err)
+			{
+				if (0 > err)
+				{
+					// Wrong key error, red
+					LED_SetRGBColor(0xff0000);
+				}
+				else if (1 == err)
+				{
+					// RSA decryption error, orange
+					LED_SetRGBColor(0xff6000);
+				}
+				else if (2 == err)
+				{
+					// RSA signature verification error, magenta
+					LED_SetRGBColor(0xff00ff);
+				}
+				LED_On(LED_RGB);
+			}
+			else
+			{
+				SPARK_HANDSHAKE_COMPLETED = 1;
+				TimingCloudSocketTimeout = 0;
+			}
+		}
 
-    return testResult;
+		if (!Spark_Communication_Loop())
+		{
+			if (LED_RGB_OVERRIDE)
+			{
+				LED_Signaling_Stop();
+			}
+
+			SPARK_FLASH_UPDATE = 0;
+			SPARK_LED_FADE = 0;
+			SPARK_HANDSHAKE_COMPLETED = 0;
+			SPARK_SOCKET_CONNECTED = 0;
+
+			if(TimingCloudSocketTimeout != 0) /* Set within Timing_Decrement() */
+			{
+				/* Work around for CFOD issue */
+				SPARK_WLAN_RESET = 1;
+
+				//NVIC_SystemReset(); /* Better alternative */
+			}
+		}
+	}
 }
