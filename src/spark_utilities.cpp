@@ -34,16 +34,10 @@ SparkProtocol spark_protocol;
 long sparkSocket;
 sockaddr tSocketAddr;
 
-timeval timeout;
-_types_fd_set_cc3000 readSet;
-
-char digits[] = "0123456789";
-
-int total_bytes_received = 0;
-
-uint32_t chunkIndex;
+//char digits[] = "0123456789";
 
 extern unsigned int millis();
+extern uint8_t LED_RGB_BRIGHTNESS;
 
 // LED_Signaling_Override
 __IO uint8_t LED_Spark_Signal;
@@ -125,9 +119,16 @@ void RGBClass::color(int red, int green, int blue)
 	if (true != _control)
 		return;
 
-	TIM1->CCR2 = (uint16_t)(red   * (TIM1->ARR + 1) / 255);	// Red LED
-	TIM1->CCR3 = (uint16_t)(green * (TIM1->ARR + 1) / 255);	// Green LED
-	TIM1->CCR1 = (uint16_t)(blue  * (TIM1->ARR + 1) / 255);	// Blue LED
+	TIM1->CCR2 = (uint16_t)((red   * LED_RGB_BRIGHTNESS * (TIM1->ARR + 1)) >> 16);	// Red LED
+	TIM1->CCR3 = (uint16_t)((green * LED_RGB_BRIGHTNESS * (TIM1->ARR + 1)) >> 16);	// Green LED
+	TIM1->CCR1 = (uint16_t)((blue  * LED_RGB_BRIGHTNESS * (TIM1->ARR + 1)) >> 16);	// Blue LED
+#endif
+}
+
+void RGBClass::brightness(uint8_t brightness)
+{
+#if !defined (RGB_NOTIFICATIONS_ON)
+  LED_SetBrightness(brightness);
 #endif
 }
 
@@ -246,15 +247,101 @@ bool SparkClass::connected(void)
 		return false;
 }
 
+int SparkClass::connect(void)
+{
+	//Schedule Spark's cloud connection and handshake
+	SPARK_SOCKET_HANDSHAKE = 1;
+	return 0;
+}
+
+int SparkClass::disconnect(void)
+{
+	//Schedule Spark's cloud disconnection
+	SPARK_SOCKET_HANDSHAKE = 0;
+	return 0;
+}
+
+String SparkClass::deviceID(void)
+{
+	String deviceID;
+	char hex_digit;
+	char id[12];
+	memcpy(id, (char *)ID1, 12);
+	//OR
+	//uint8_t id[12];
+	//Get_Unique_Device_ID(id);
+
+	for (int i = 0; i < 12; ++i)
+	{
+		hex_digit = 48 + (id[i] >> 4);
+		if (57 < hex_digit)
+		{
+			hex_digit += 39;
+		}
+		deviceID.concat(hex_digit);
+
+		hex_digit = 48 + (id[i] & 0xf);
+		if (57 < hex_digit)
+		{
+			hex_digit += 39;
+		}
+		deviceID.concat(hex_digit);
+	}
+
+	return deviceID;
+}
+
 // Returns number of bytes sent or -1 if an error occurred
 int Spark_Send(const unsigned char *buf, int buflen)
 {
-  return send(sparkSocket, buf, buflen, 0);
+  timeval timeout;
+  _types_fd_set_cc3000 writeSet;
+  int bytes_sent = 0;
+  int num_fds_ready = 0;
+
+  if(SPARK_WLAN_RESET || SPARK_WLAN_SLEEP)
+  {
+    //break from any blocking loop
+    return -1;
+  }
+
+  // reset the fd_set structure
+  FD_ZERO(&writeSet);
+  FD_SET(sparkSocket, &writeSet);
+
+  // tell select to timeout after the minimum 5000 microseconds
+  // defined in the SimpleLink API as SELECT_TIMEOUT_MIN_MICRO_SECONDS
+  timeout.tv_sec = 0;
+  timeout.tv_usec = 5000;
+
+  num_fds_ready = select(sparkSocket + 1, NULL, &writeSet, NULL, &timeout);
+
+  if (0 < num_fds_ready)
+  {
+    if (FD_ISSET(sparkSocket, &writeSet))
+    {
+      // send returns negative numbers on error
+      bytes_sent = send(sparkSocket, buf, buflen, 0);
+      TimingCloudSocketTimeout = 0;
+    }
+  }
+  else if (0 > num_fds_ready)
+  {
+    // error from select
+    return num_fds_ready;
+  }
+
+  return bytes_sent;
 }
 
 // Returns number of bytes received or -1 if an error occurred
 int Spark_Receive(unsigned char *buf, int buflen)
 {
+  timeval timeout;
+  _types_fd_set_cc3000 readSet;
+  int bytes_received = 0;
+  int num_fds_ready = 0;
+
   if(SPARK_WLAN_RESET || SPARK_WLAN_SLEEP)
   {
     //break from any blocking loop
@@ -270,8 +357,7 @@ int Spark_Receive(unsigned char *buf, int buflen)
   timeout.tv_sec = 0;
   timeout.tv_usec = 5000;
 
-  int bytes_received = 0;
-  int num_fds_ready = select(sparkSocket + 1, &readSet, NULL, NULL, &timeout);
+  num_fds_ready = select(sparkSocket + 1, &readSet, NULL, NULL, &timeout);
 
   if (0 < num_fds_ready)
   {
@@ -279,7 +365,7 @@ int Spark_Receive(unsigned char *buf, int buflen)
     {
       // recv returns negative numbers on error
       bytes_received = recv(sparkSocket, buf, buflen, 0);
-      TimingSparkCommTimeout = 0;
+      TimingCloudSocketTimeout = 0;
     }
   }
   else if (0 > num_fds_ready)
@@ -294,13 +380,21 @@ int Spark_Receive(unsigned char *buf, int buflen)
 void Spark_Prepare_For_Firmware_Update(void)
 {
   SPARK_FLASH_UPDATE = 1;
+  TimingFlashUpdateTimeout = 0;
   FLASH_Begin(EXTERNAL_FLASH_OTA_ADDRESS);
 }
 
 void Spark_Finish_Firmware_Update(void)
 {
   SPARK_FLASH_UPDATE = 0;
+  TimingFlashUpdateTimeout = 0;
   FLASH_End();
+}
+
+void Spark_Save_Firmware_Chunk(unsigned char *buf, long unsigned int buflen)
+{
+  TimingFlashUpdateTimeout = 0;
+  FLASH_Update(buf, buflen);
 }
 
 int numUserFunctions(void)
@@ -359,7 +453,7 @@ void Spark_Protocol_Init(void)
     callbacks.prepare_for_firmware_update = Spark_Prepare_For_Firmware_Update;
     callbacks.finish_firmware_update = Spark_Finish_Firmware_Update;
     callbacks.calculate_crc = Compute_CRC32;
-    callbacks.save_firmware_chunk = FLASH_Update;
+    callbacks.save_firmware_chunk = Spark_Save_Firmware_Chunk;
     callbacks.signal = Spark_Signal;
     callbacks.millis = millis;
 
@@ -469,49 +563,44 @@ void Spark_Signal(bool on)
   }
 }
 
-int SparkClass::connect(void)
+int Internet_Test(void)
 {
-	return Spark_Connect();
-}
+	long testSocket;
+	sockaddr testSocketAddr;
+	int testResult = 0;
 
-int SparkClass::disconnect(void)
-{
-	return Spark_Disconnect();
-}
+    testSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-String SparkClass::deviceID(void)
-{
-	String deviceID;
-	char hex_digit;
-	char id[12];
-	memcpy(id, (char *)ID1, 12);
-	//OR
-	//uint8_t id[12];
-	//Get_Unique_Device_ID(id);
+    if (testSocket < 0)
+    {
+        return -1;
+    }
 
-	for (int i = 0; i < 12; ++i)
-	{
-		hex_digit = 48 + (id[i] >> 4);
-		if (57 < hex_digit)
-		{
-			hex_digit += 39;
-		}
-		deviceID.concat(hex_digit);
+	// the family is always AF_INET
+    testSocketAddr.sa_family = AF_INET;
 
-		hex_digit = 48 + (id[i] & 0xf);
-		if (57 < hex_digit)
-		{
-			hex_digit += 39;
-		}
-		deviceID.concat(hex_digit);
-	}
+	// the destination port: 53
+    testSocketAddr.sa_data[0] = 0;
+    testSocketAddr.sa_data[1] = 53;
 
-	return deviceID;
+	// the destination IP address: 8.8.8.8
+	testSocketAddr.sa_data[2] = 8;
+	testSocketAddr.sa_data[3] = 8;
+	testSocketAddr.sa_data[4] = 8;
+	testSocketAddr.sa_data[5] = 8;
+
+	testResult = connect(testSocket, &testSocketAddr, sizeof(testSocketAddr));
+
+	closesocket(testSocket);
+
+	//if connection fails, testResult returns -1
+    return testResult;
 }
 
 int Spark_Connect(void)
 {
   Spark_Disconnect();
+
   sparkSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
   if (sparkSocket < 0)

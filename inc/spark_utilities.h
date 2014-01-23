@@ -37,6 +37,9 @@
 //#define SPARK_SERVER_IP				"54.235.79.249"
 #define SPARK_SERVER_PORT			5683
 
+#define TIMING_CLOUD_SOCKET_TIMEOUT	30000	//30sec
+#define TIMING_FLASH_UPDATE_TIMEOUT	5000	//5sec
+
 #define USER_VAR_MAX_COUNT			10
 #define USER_VAR_KEY_LENGTH			12
 
@@ -65,6 +68,7 @@ public:
 	static bool controlled(void);
 	static void control(bool);
 	static void color(int, int, int);
+  static void brightness(uint8_t);
 };
 
 class SparkClass {
@@ -88,6 +92,8 @@ extern __IO uint8_t LED_Spark_Signal;
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+int Internet_Test(void);
 
 int Spark_Connect(void);
 int Spark_Disconnect(void);

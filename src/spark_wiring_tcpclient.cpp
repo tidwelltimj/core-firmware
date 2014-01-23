@@ -29,12 +29,10 @@ uint16_t TCPClient::_srcport = 1024;
 
 TCPClient::TCPClient() : _sock(MAX_SOCK_NUM)
 {
-
 }
 
 TCPClient::TCPClient(uint8_t sock) : _sock(sock) 
 {
-
 }
 
 int TCPClient::connect(const char* host, uint16_t port) 
@@ -53,6 +51,11 @@ int TCPClient::connect(const char* host, uint16_t port)
 
 int TCPClient::connect(IPAddress ip, uint16_t port) 
 {
+	if(WLAN_DHCP != 1)
+	{
+		return 0;
+	}
+
 	sockaddr tSocketAddr;
 
 	_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -61,6 +64,9 @@ int TCPClient::connect(IPAddress ip, uint16_t port)
 	{
 		return 0;
 	}
+
+	_offset = 0;
+	_remaining = 0;
 
 	tSocketAddr.sa_family = AF_INET;
 
@@ -87,13 +93,28 @@ size_t TCPClient::write(uint8_t b)
 	return write(&b, 1);
 }
 
-size_t TCPClient::write(const uint8_t *buf, size_t size) 
+size_t TCPClient::write(const uint8_t *buffer, size_t size)
 {
-	return send(_sock, buf, size, 0);
+	if((WLAN_DHCP != 1) || (_sock == MAX_SOCK_NUM))
+	{
+		return -1;
+	}
+
+	return send(_sock, buffer, size, 0);
 }
 
 int TCPClient::available() 
 {
+	if((WLAN_DHCP != 1) || (_sock == MAX_SOCK_NUM))
+	{
+		return 0;
+	}
+
+	if ((_remaining > 0) && (_offset < _remaining))
+	{
+		return (_remaining - _offset);
+	}
+
 	_types_fd_set_cc3000 readSet;
 	timeval timeout;
 
@@ -107,7 +128,14 @@ int TCPClient::available()
 	{
 		if (FD_ISSET(_sock, &readSet))
 		{
-			return 1;
+			int ret = recv(_sock, _buffer, RX_BUF_MAX_SIZE, 0);
+			if (ret > 0)
+			{
+				_offset = 0;
+				_remaining = ret;
+			}
+
+			return ret;
 		}
 	}
 
@@ -116,20 +144,51 @@ int TCPClient::available()
 
 int TCPClient::read() 
 {
-	uint8_t b;
-	if (recv(_sock, &b, 1, 0) > 0)
-	{
-		return b;
-	}
-	else
+	if((WLAN_DHCP != 1) || (_sock == MAX_SOCK_NUM))
 	{
 		return -1;
 	}
+
+	uint8_t byte;
+
+	if ((_remaining > 0) && (_offset < RX_BUF_MAX_SIZE))
+	{
+		byte = _buffer[_offset++];
+		_remaining--;
+		return byte;
+	}
+
+	return -1;
 }
 
-int TCPClient::read(uint8_t *buf, size_t size) 
+int TCPClient::read(uint8_t *buffer, size_t size)
 {
-	return recv(_sock, buf, size, 0);
+	if((WLAN_DHCP != 1) || (_sock == MAX_SOCK_NUM))
+	{
+		return -1;
+	}
+
+	if ((_remaining > 0) && (_offset < RX_BUF_MAX_SIZE))
+	{
+		if (_remaining <= size)
+		{
+			memcpy(buffer, _buffer, _remaining);
+			_offset = _remaining;
+		}
+		else
+		{
+			memcpy(buffer, _buffer, size);
+			_offset = size;
+		}
+
+		if (_offset > 0)
+		{
+			_remaining -= _offset;
+			return _offset;
+		}
+	}
+
+	return -1;
 }
 
 int TCPClient::peek() 
