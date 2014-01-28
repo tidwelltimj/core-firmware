@@ -9,8 +9,9 @@ AR = $(GCC_PREFIX)ar
 OBJCOPY = $(GCC_PREFIX)objcopy
 SIZE = $(GCC_PREFIX)size
 
-RM = rm -f
-MKDIR = mkdir -p
+RM = "C:\Program Files (x86)\Git\bin\mkdir.exe" -f
+MKDIR = "C:\Program Files (x86)\Git\bin\mkdir.exe" -p
+
 
 # Recursive wildcard function
 rwildcard = $(wildcard $1$2) $(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2))

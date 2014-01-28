@@ -13,6 +13,8 @@ INCLUDE_DIRS += inc
 CSRC +=
 
 # C++ source files included in this build.
+CPPSRC += $(TARGET_SRC_PATH)/DallasTemperature.cpp
+CPPSRC += $(TARGET_SRC_PATH)/OneWire.cpp
 CPPSRC += $(TARGET_SRC_PATH)/application.cpp
 CPPSRC += $(TARGET_SRC_PATH)/main.cpp
 CPPSRC += $(TARGET_SRC_PATH)/newlib_stubs.cpp
